@@ -1,0 +1,52 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+package bin::ebayapi3;
+
+use Dispatch::Fu;
+use JSON qw/encode_json/;
+use eBay::Client::OpenAPI3;
+use Util::H2O::More qw/ddd Getopt2h2o h2o o2h/;
+
+use constant {
+    ERROR_SUCCESS => 0,
+    ERROR_FATAL   => 1,
+    CONFIG        => sprintf( qq{%s/%s}, ( getpwuid $< )[7], qq{.ebay3api.conf} ),
+};
+
+my $subcommand = shift @ARGV;
+my $o          = { config => CONFIG, debug => undef };
+
+exit dispatch {
+    my $input_ref = shift;
+    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+    xdefault $subcommand, q{oauth2};
+} [ $subcommand, \@ARGV, $o ],
+ on help   => \&show_help,
+ on oauth2 => \&oauth2;
+
+sub show_help {
+    print STDERR <<EOHELP;
+ ... print help section
+EOHELP
+    return ERROR_FATAL;
+}
+
+sub oauth2 {
+    my $input_ref = shift;
+    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s/;
+    my $ec    = eBay::Client::OpenAPI3->new( config => $o->config );
+    my $token = $ec->oauth2;
+    if ( $o->as and $o->as eq q{json} ) {
+        print encode_json o2h $token;
+    }
+    print $token->access_token;
+    return ERROR_SUCCESS;
+}
+
+__END__
+
+=head1 ebayapi3 - a commandline client using Perl's eBay::Client::OpenAPI3
