@@ -9,6 +9,7 @@ use Dispatch::Fu;
 use JSON qw/encode_json/;
 use eBay::Client::OpenAPI3;
 use Util::H2O::More qw/ddd Getopt2h2o h2o o2h/;
+use URI qw/query_form/;
 
 use constant {
     ERROR_SUCCESS => 0,
@@ -17,13 +18,14 @@ use constant {
 };
 
 my $subcommand = shift @ARGV;
-my $o          = { config => CONFIG, debug => undef };
+my $o          = { config => CONFIG, debug => undef, limit => 200 };
 
 exit dispatch {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
     xdefault $subcommand, q{oauth2};
 } [ $subcommand, \@ARGV, $o ],
+ on browse => \&browse,
  on help   => \&show_help,
  on oauth2 => \&oauth2;
 
@@ -34,16 +36,26 @@ EOHELP
     return ERROR_FATAL;
 }
 
+sub browse {
+    my $input_ref = shift;
+    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s category_ids=s limit=i/;
+    my $ec      = eBay::Client::OpenAPI3->new( config => $o->config );
+    my $json = $ec->oauth2->browse( category_ids => $o->category_ids, limit => $o->limit );
+    print $json;
+    return ERROR_SUCCESS;
+}
+
 sub oauth2 {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
     Getopt2h2o $ARGV_ref, $o, qw/as=s/;
     my $ec    = eBay::Client::OpenAPI3->new( config => $o->config );
-    my $token = $ec->oauth2;
+    $ec->oauth2;
     if ( $o->as and $o->as eq q{json} ) {
-        print encode_json o2h $token;
+        print encode_json o2h $ec->token;
     }
-    print $token->access_token;
+    print $ec->token->access_token;
     return ERROR_SUCCESS;
 }
 
