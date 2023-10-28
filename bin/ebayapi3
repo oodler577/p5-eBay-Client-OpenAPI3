@@ -40,9 +40,6 @@ EOHELP
     return ERROR_FATAL;
 }
 
-# TODO: support,
-# --sort newlyListed|endingSoonest
-# --total                         # return total count, only
 sub browse {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
