@@ -14,7 +14,7 @@ our $EBAY_ENDPOINT_BASE = q{https://api.ebay.com};
 sub new {
     my $pkg  = shift;
     my %opts = @_;
-    my $self = baptise \%opts, $pkg, qw/config token/;
+    my $self = baptise \%opts, $pkg, qw/config next token total/;
     die qq{configuration file not found\n} if not -e $self->config;
     my $config_file = $self->config;        # initially, ->config is just a string file name
     $self->config(ini2h2o $config_file);    # then it becomes an actual Config::Tiny object with accessors
@@ -47,7 +47,10 @@ sub oauth2 {
     return $self;
 }
 
-sub browse {
+# https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
+
+#NOTE: "browser" is not meant to be a generic kitchen sink; if implementing your own "browse"
+sub browse_auctions {
     my ($self, %params) = @_;
     my $ua              = HTTP::Tiny->new();
     my $uri             = URI->new('', 'http');
@@ -66,7 +69,13 @@ sub browse {
         content => undef,
     };
     my $response = h2o $ua->get($URL, $options);;
-    my $json = $response->content;
+    my $raw = $response->content;
+    my $json = d2o from_json $raw;
+
+    # capture the next URL as member, "next"
+    $self->next($json->next);
+    $self->total($json->total);
+
     return $json;
 }
 

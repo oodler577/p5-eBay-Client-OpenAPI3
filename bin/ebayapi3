@@ -6,10 +6,11 @@ use warnings;
 package bin::ebayapi3;
 
 use Dispatch::Fu;
-use JSON qw/encode_json/;
+use JSON qw/to_json from_json/;
 use eBay::Client::OpenAPI3;
-use Util::H2O::More qw/ddd Getopt2h2o h2o o2h/;
-use URI qw/query_form/;
+use Util::H2O::More qw/ddd Getopt2h2o h2o o2h o2d/;
+use URI             qw/query_form/;
+use YAML            qw//;
 
 use constant {
     ERROR_SUCCESS => 0,
@@ -18,16 +19,19 @@ use constant {
 };
 
 my $subcommand = shift @ARGV;
-my $o          = { config => CONFIG, debug => undef, limit => 200 };
+my $o          = { config => CONFIG, debug => undef, limit => 200, offset => 0, sort => q{endingSoonest}, verbose => undef };
 
-exit dispatch {
+my $exit = dispatch {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
     xdefault $subcommand, q{oauth2};
-} [ $subcommand, \@ARGV, $o ],
- on browse => \&browse,
- on help   => \&show_help,
- on oauth2 => \&oauth2;
+}
+[ $subcommand, \@ARGV, $o ],
+  on browse => \&browse,
+  on help   => \&show_help,
+  on oauth2 => \&oauth2;
+
+exit $exit;
 
 sub show_help {
     print STDERR <<EOHELP;
@@ -36,24 +40,87 @@ EOHELP
     return ERROR_FATAL;
 }
 
+# TODO: support,
+# --sort newlyListed|endingSoonest
+# --total                         # return total count, only
 sub browse {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s category_ids=s limit=i/;
-    my $ec      = eBay::Client::OpenAPI3->new( config => $o->config );
-    my $json = $ec->oauth2->browse( category_ids => $o->category_ids, limit => $o->limit );
-    print $json;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=i stats/;
+
+    my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
+    my ($total, $gotten, $num_requests, $request_count);
+
+  GETITEMS:
+    {
+        $o->buyopt([qw/AUCTION/]) if not $o->buyopt;
+        my $buyingOptions = join q{|}, @{$o->buyopt};
+        my $filter = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
+        my $ref = $ec->oauth2->browse_auctions( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort );
+        if (not $total) {
+          $total        = $ref->total;
+          $num_requests = int $total / $o->limit;
+          if (not $o->max) {
+            $o->max($total);
+          }
+        }
+
+        $gotten += $o->limit;
+
+        ++$request_count;
+        printf STDERR qq{% 2d/%d requests, % 5d/%d items gotten ...\n}, $request_count, $num_requests, $gotten, $total if $o->stats;
+
+        if ($o->max and $o->max < $gotten) {
+          printf STDERR qq{fetch shutting down, number got exceeded max set with, "--max %d"\n}, $o->max;
+          exit;
+        }
+
+        if ( $o->as and $o->as eq q{yaml} ) {
+            my $_ref = o2d $ref;
+            my $yaml = YAML::Dump($ref);
+            print $yaml;
+        }
+        else {
+            my $_ref = o2d $ref;
+            my $json = to_json $_ref;
+            print $json;
+        }
+
+        # parse out query params in the 'next' field, (next URL with updated pagination details)
+        my (@query) = split /[?&]/, $ec->next;
+        my $url     = shift @query;
+        my %params  = map { split /=/, $_ } @query;
+        my $p       = h2o \%params;
+
+        # output "next" command 
+        printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s --as yaml --continue\n}, $p->offset, $p->limit, $p->sort, $p->category_ids if $o->nextcmd;
+
+        # run again, with the updated pagination parameters
+        if ( $o->continue ) {
+            $o->offset( $p->offset );
+            $o->limit( $p->limit );
+            goto GETITEMS;
+        }
+    }
+
     return ERROR_SUCCESS;
 }
 
+# TODO: implementat "--as yaml" and "--as ini"
 sub oauth2 {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
     Getopt2h2o $ARGV_ref, $o, qw/as=s/;
-    my $ec    = eBay::Client::OpenAPI3->new( config => $o->config );
+    my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
     $ec->oauth2;
     if ( $o->as and $o->as eq q{json} ) {
-        print encode_json o2h $ec->token;
+        print to_json o2h $ec->token;
+    }
+    elsif ( $o->as and $o->as eq q{yaml} ) {
+
+    }
+    elsif ( $o->as and $o->as eq q{ini} ) {
+
     }
     print $ec->token->access_token;
     return ERROR_SUCCESS;
