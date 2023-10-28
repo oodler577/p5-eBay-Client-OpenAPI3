@@ -50,7 +50,7 @@ sub oauth2 {
 # https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
 
 #NOTE: "browser" is not meant to be a generic kitchen sink; if implementing your own "browse"
-sub browse_auctions {
+sub browse {
     my ($self, %params) = @_;
     my $ua              = HTTP::Tiny->new();
     my $uri             = URI->new('', 'http');
@@ -85,3 +85,28 @@ __END__
 
 =head1 eBay::Client::OpenAPI3 - unambitious Perl client for eBay's "OpenAPI3" version of APIs
 
+=head1 SYNOPSIS
+
+=head1 DESCRIPTION
+
+=head1 METHODS
+
+=head1 SUPPORTED APIs
+
+=head1 BUGS & SUPPORT REQUESTS
+
+Please report bugs on Github.
+
+L<< https://github.com/oodler577/p5-eBay-Client-OpenAPI3/issues >>
+
+The author of this utlity and module may be contracted for very reasonable rates
+by anyone wishing to significantly extend it or the underlying module. For
+requests of this nature, please email the author at the email listed below.
+
+=head1 AUTHOR
+
+Oodler 577 L<< <oodler@cpan.org> >>
+
+=head1 LICENSE & COPYRIGHT
+
+Same as Perl/C<perl>.

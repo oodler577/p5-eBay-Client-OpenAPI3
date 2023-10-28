@@ -12,26 +12,30 @@ use Util::H2O::More qw/ddd Getopt2h2o h2o o2h o2d/;
 use URI             qw/query_form/;
 use YAML            qw//;
 
+binmode(STDOUT, ":encoding(UTF-8)");
+
 use constant {
     ERROR_SUCCESS => 0,
     ERROR_FATAL   => 1,
-    CONFIG        => sprintf( qq{%s/%s}, ( getpwuid $< )[7], qq{.ebay3api.conf} ),
+    CONFIG        => sprintf( qq{%s/%s}, ( getpwuid $< )[7], qq{.ebayapi3.conf} ),
+    MAX_TOTAL     => 10_000, #per documentation
 };
 
 my $subcommand = shift @ARGV;
 my $o          = { config => CONFIG, debug => undef, limit => 200, offset => 0, sort => q{endingSoonest}, verbose => undef };
 
-my $exit = dispatch {
-    my $input_ref = shift;
-    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    xdefault $subcommand, q{oauth2};
-}
-[ $subcommand, \@ARGV, $o ],
+if (not caller) {
+  my $exit = dispatch {
+      my $input_ref = shift;
+      my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+      xdefault $subcommand, q{oauth2};
+  }
+  [ $subcommand, \@ARGV, $o ],
   on browse => \&browse,
   on help   => \&show_help,
   on oauth2 => \&oauth2;
-
-exit $exit;
+  exit $exit;
+}
 
 sub show_help {
     print STDERR <<EOHELP;
@@ -53,13 +57,15 @@ sub browse {
         $o->buyopt([qw/AUCTION/]) if not $o->buyopt;
         my $buyingOptions = join q{|}, @{$o->buyopt};
         my $filter = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
-        my $ref = $ec->oauth2->browse_auctions( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort );
+        my $ref = $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort );
+
+        # set before first results are in
         if (not $total) {
-          $total        = $ref->total;
+          $total        = $o->max // $ref->total;
+          die qq{FATAL: total not set, something is wrong!\n} if not $total;
+          $total = ($total < MAX_TOTAL) ? $total : MAX_TOTAL; # limit set above, based on eBay docs 
           $num_requests = int $total / $o->limit;
-          if (not $o->max) {
-            $o->max($total);
-          }
+          $o->max($total);
         }
 
         $gotten += $o->limit;
@@ -72,15 +78,15 @@ sub browse {
           exit;
         }
 
-        if ( $o->as and $o->as eq q{yaml} ) {
-            my $_ref = o2d $ref;
-            my $yaml = YAML::Dump($ref);
-            print $yaml;
-        }
-        else {
+        if ( $o->as and $o->as eq q{json} ) {
             my $_ref = o2d $ref;
             my $json = to_json $_ref;
             print $json;
+        }
+        else {
+            my $_ref = o2d $ref;
+            my $yaml = YAML::Dump($ref);
+            print $yaml;
         }
 
         # parse out query params in the 'next' field, (next URL with updated pagination details)
@@ -89,7 +95,7 @@ sub browse {
         my %params  = map { split /=/, $_ } @query;
         my $p       = h2o \%params;
 
-        # output "next" command 
+        # output "next" command to STDERR, maybe can be used to script an external looping...
         printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s --as yaml --continue\n}, $p->offset, $p->limit, $p->sort, $p->category_ids if $o->nextcmd;
 
         # run again, with the updated pagination parameters
@@ -125,4 +131,59 @@ sub oauth2 {
 
 __END__
 
-=head1 ebayapi3 - a commandline client using Perl's eBay::Client::OpenAPI3
+=head1 NAME ebayapi3 - a commandline client using Perl's eBay::Client::OpenAPI3
+
+=head1 SYNOPSIS
+
+  ./bin/ebayapi3 browse --limit 200 --category_ids 13885 --stats --continue >
+  latest.yaml
+
+=head1 DESCRIPTION
+
+This is an unambitious client for the  eBay OpenAPI 3.0 client that exposes some
+of what's in L<eBay::Client::OpenAPI3> for commandline use.
+
+It implements subcommands, but there are only 2 that are currently available:
+I<browse> and I<oauth>.
+
+=head2 USAGE
+
+B<Note:> the default output is in YAML. The reason for this is because it is
+easier to dump seperate I<documents> (here, eBay result sets) to the same file
+due ti the use of the C<---> separator. If the same thing was attempted with
+JSON, it would be an invalid file of isolated JSON objects listed one right
+after the other. If you really want to output in JSON, look at the C<--as json>
+flag.
+
+=head2 C<ebay3cli oauth2>
+
+=head2 C<ebay3cli browse>
+
+=head1 ENVIRONMENT
+
+By default, this utility looks for configuration details in C<~/.ebayapi3.conf>,
+and expects valid information in the following INI structure:
+
+  [eBay]
+  client_id            = something-SLUG-PRO-dead-beef-4567
+  client_secret        = PRD-dead-beef-1234
+  affiliateCampaignId  = someinteger 
+  affiliateReferenceId =  notsurewhatthislookslike
+
+=head1 BUGS & SUPPORT REQUESTS
+
+Please report bugs on Github.
+
+L<< https://github.com/oodler577/p5-eBay-Client-OpenAPI3/issues >>
+
+The author of this utlity and module may be contracted for very reasonable rates
+by anyone wishing to significantly extend it or the underlying module. For
+requests of this nature, please email the author at the email listed below.
+
+=head1 AUTHOR
+
+Oodler 577 L<< <oodler@cpan.org> >>
+
+=head1 LICENSE & COPYRIGHT
+
+Same as Perl/C<perl>.
