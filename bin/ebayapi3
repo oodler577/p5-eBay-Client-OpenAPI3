@@ -80,15 +80,15 @@ sub browse {
             exit;
         }
 
-        if ( $o->as and $o->as eq q{json} ) {
-            my $_ref = o2d $ref;
-            my $json = to_json $_ref;
-            print $json;
-        }
-        else {
+        if ( $o->as and $o->as eq q{yaml} ) {
             my $_ref = o2d $ref;
             my $yaml = YAML::Dump($ref);
             print $yaml;
+        }
+        else {
+            my $_ref = o2d $ref;
+            my $json = to_json $_ref;
+            print $json;
         }
 
         # parse out query params in the 'next' field, (next URL with updated pagination details)
