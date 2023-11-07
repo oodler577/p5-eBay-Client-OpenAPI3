@@ -70,7 +70,8 @@ sub browse {
     };
     my $response = h2o $ua->get($URL, $options);;
     my $raw = $response->content;
-    my $json = d2o from_json $raw;
+    my $json = from_json $raw;
+    h2o $json, qw/next total/;
 
     # capture the next URL as member, "next"
     $self->next($json->next);

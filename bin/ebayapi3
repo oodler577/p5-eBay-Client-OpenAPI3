@@ -12,19 +12,20 @@ use Util::H2O::More qw/ddd Getopt2h2o h2o o2h o2d/;
 use URI             qw/query_form/;
 use YAML            qw//;
 
-binmode(STDOUT, ":encoding(UTF-8)");
+binmode( STDOUT, ":encoding(UTF-8)" );
 
 use constant {
     ERROR_SUCCESS => 0,
     ERROR_FATAL   => 1,
     CONFIG        => sprintf( qq{%s/%s}, ( getpwuid $< )[7], qq{.ebayapi3.conf} ),
-    MAX_TOTAL     => 10_000, #per documentation
+    MAX_TOTAL     => 10_000,                                                         #per documentation
 };
 
 my $subcommand = shift @ARGV;
 my $o          = { config => CONFIG, debug => undef, limit => 200, offset => 0, sort => q{endingSoonest}, verbose => undef };
 
-if (not caller) {
+if ( not caller ) {
+#<<<
   my $exit = dispatch {
       my $input_ref = shift;
       my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
@@ -34,7 +35,8 @@ if (not caller) {
   on browse => \&browse,
   on help   => \&show_help,
   on oauth2 => \&oauth2;
-  exit $exit;
+#>>>
+    exit $exit;
 }
 
 sub show_help {
@@ -50,32 +52,32 @@ sub browse {
     Getopt2h2o $ARGV_ref, $o, qw/as=s buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=i stats/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
-    my ($total, $gotten, $num_requests, $request_count);
+    my ( $total, $gotten, $num_requests, $request_count );
 
   GETITEMS:
     {
-        $o->buyopt([qw/AUCTION/]) if not $o->buyopt;
-        my $buyingOptions = join q{|}, @{$o->buyopt};
-        my $filter = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
-        my $ref = $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort );
+        $o->buyopt( [qw/AUCTION/] ) if not $o->buyopt;
+        my $buyingOptions = join q{|}, @{ $o->buyopt };
+        my $filter        = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
+        my $ref           = $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort );
 
         # set before first results are in
-        if (not $total) {
-          $total        = $o->max // $ref->total;
-          die qq{FATAL: total not set, something is wrong!\n} if not $total;
-          $total = ($total < MAX_TOTAL) ? $total : MAX_TOTAL; # limit set above, based on eBay docs 
-          $num_requests = int $total / $o->limit;
-          $o->max($total);
+        if ( not $total ) {
+            $total = $o->max // $ref->total;
+            die qq{FATAL: total not set, something is wrong!\n} if not $total;
+            $total        = ( $total < MAX_TOTAL ) ? $total : MAX_TOTAL;    # limit set above, based on eBay docs
+            $num_requests = int $total / $o->limit;
+            $o->max($total);
         }
 
         $gotten += $o->limit;
 
         ++$request_count;
-        printf STDERR qq{% 2d/%d requests, % 5d/%d items gotten ...\n}, $request_count, $num_requests, $gotten, $total if $o->stats;
+        printf STDERR qq{%02d/%d requests, %05d/%d items gotten ...\n}, $request_count, $num_requests, $gotten, $total if $o->stats;
 
-        if ($o->max and $o->max < $gotten) {
-          printf STDERR qq{fetch shutting down, number got exceeded max set with, "--max %d"\n}, $o->max;
-          exit;
+        if ( $o->max and $o->max < $gotten ) {
+            printf STDERR qq{fetch shutting down, number got exceeded max set with, "--max %d"\n}, $o->max;
+            exit;
         }
 
         if ( $o->as and $o->as eq q{json} ) {
@@ -99,7 +101,7 @@ sub browse {
         printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s --as yaml --continue\n}, $p->offset, $p->limit, $p->sort, $p->category_ids if $o->nextcmd;
 
         # run again, with the updated pagination parameters
-        if ( $o->continue ) {
+        if ( $o->continue and $ec->next ) {
             $o->offset( $p->offset );
             $o->limit( $p->limit );
             goto GETITEMS;
@@ -109,7 +111,6 @@ sub browse {
     return ERROR_SUCCESS;
 }
 
-# TODO: implementat "--as yaml" and "--as ini"
 sub oauth2 {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
