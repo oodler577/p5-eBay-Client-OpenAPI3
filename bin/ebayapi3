@@ -5,6 +5,8 @@ use warnings;
 
 package bin::ebayapi3;
 
+use FindBin qw/$Bin/;
+use lib qq{$Bin/../lib};
 use Dispatch::Fu;
 use JSON qw/to_json from_json/;
 use eBay::Client::OpenAPI3;
