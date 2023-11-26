@@ -71,7 +71,9 @@ sub browse {
     my $response = h2o $ua->get($URL, $options);;
     my $raw = $response->content;
     my $json = from_json $raw;
-    h2o $json, qw/next total/;
+    $json->{next}  = $json->{next}  // undef; # d2o should probably allow some top level
+    $json->{total} = $json->{total} // undef; # default accessors to be defined
+    d2o $json;
 
     # capture the next URL as member, "next"
     $self->next($json->next);
