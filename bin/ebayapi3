@@ -104,16 +104,20 @@ sub browse {
             my $title = $item->title;
             $item->title(convert_to_ascii($title));
           }
-          my $_ref = o2d $ref;
-          my $coder = JSON::XS->new->utf8->pretty->allow_nonref;
-          my $ascii = $coder->encode($_ref);
+          my $coder = JSON::XS->new->utf8->pretty;
+          my $ascii = $coder->encode(o2d $ref);
           print $ascii;
         },
         on json => sub {
           my $input_ref = shift;
           my ($o, $ref) = @$input_ref;
-          my $_ref = o2d $ref;
-          print encode_json $_ref;
+          foreach my $item ($ref->itemSummaries->all) {
+            my $title = $item->title;
+            $item->title(convert_to_ascii($title));
+          }
+          my $coder = JSON::XS->new->utf8;
+          my $ascii = $coder->encode(o2d $ref);
+          print $ascii;
         };
 #>>>
 
@@ -137,8 +141,7 @@ sub browse {
     return ERROR_SUCCESS;
 }
 
-sub oauth2 {
-    my $input_ref = shift;
+sub oauth2 { my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
     Getopt2h2o $ARGV_ref, $o, qw/as=s/;
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
