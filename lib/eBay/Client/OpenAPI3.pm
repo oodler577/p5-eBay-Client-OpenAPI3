@@ -47,6 +47,17 @@ sub oauth2 {
     return $self;
 }
 
+# TODO: implement "getItems" - can get up to 20 items per call according to documentation
+#   https://developer.ebay.com/api-docs/buy/browse/resources/item/methods/getItem
+#
+# Call limit for all Browse APIs is 5,000 / day
+#   https://developer.ebay.com/develop/apis/api-call-limits
+
+# getItems (part of the 'Browse' API
+sub getItems {
+
+}
+
 # https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
 
 #NOTE: "browser" is not meant to be a generic kitchen sink; if implementing your own "browse"
