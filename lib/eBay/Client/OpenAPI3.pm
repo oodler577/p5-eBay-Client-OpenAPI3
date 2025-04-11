@@ -38,6 +38,7 @@ sub oauth2 {
     };
 
     my $resp = h2o $ua->post($URL, $options);
+
     my $full = h2o JSON::from_json $resp->content;
 
     # set token member
@@ -81,10 +82,13 @@ sub browse {
     };
     my $response = h2o $ua->get($URL, $options);;
     my $raw = $response->content;
-    my $json = from_json $raw;
-    $json->{next}  = $json->{next}  // undef; # d2o should probably allow some top level
-    $json->{total} = $json->{total} // undef; # default accessors to be defined
+    my $json        = from_json $raw;
+    $json->{next}   = $json->{next}   // undef;         # d2o should probably allow some top level
+    $json->{total}  = $json->{total}  // undef;         # default accessors to be defined
     d2o $json;
+
+    # detect error and throww the $json response as the error object
+    die $json if exists $json->{errors};
 
     # capture the next URL as member, "next"
     $self->next($json->next);

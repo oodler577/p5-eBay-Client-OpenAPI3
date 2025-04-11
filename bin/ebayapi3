@@ -14,6 +14,7 @@ use YAML                 qw//;
 use eBay::Client::OpenAPI3;
 use Dispatch::Fu;
 use Text::ASCII::Convert qw/convert_to_ascii/;
+use POSIX qw/ceil/;
 
 #binmode( STDOUT, ":encoding(UTF-8)" );
 binmode STDOUT;
@@ -22,7 +23,7 @@ use constant {
     ERROR_SUCCESS => 0,
     ERROR_FATAL   => 1,
     CONFIG        => sprintf( qq{%s/%s}, ( getpwuid $< )[7], qq{.ebayapi3.conf} ),
-    MAX_TOTAL     => 10_000,                                                         #per documentation
+    MAX_TOTAL     => 10_000,                                                    #per documentation
 };
 
 my $subcommand = shift @ARGV;
@@ -63,21 +64,44 @@ sub browse {
         $o->buyopt( [qw/AUCTION/] ) if not $o->buyopt;
         my $buyingOptions = join q{|}, @{ $o->buyopt };
         my $filter        = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
-        my $ref           = $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort );
+
+	   local $@;
+        my $ref           = eval { $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort ) } or undef ;
+
+	# check for error
+
+#  'next' => undef,
+#  'total' => undef,
+#  'errors' => bless( [
+#     bless( {
+#       'longMessage' => 'The request limit has been reached for the resource.',
+#       'domain' => 'ACCESS',
+#       'category' => 'REQUEST',
+#       'message' => 'Too many requests.',
+#       'errorId' => 2001
+#     }, 'Util::H2O::_55c6a6fd1cc8' )
+#   ], 'Util::H2O::More::__a2o_62384735::vmethods' )
+# }, 'Util::H2O::_55c6a6f81a48' );
+
+	   # handle error; array reference, $ref->{errors}->{all} is expected to exist
+	   if ($@ and $ref->errors->all) {
+          foreach my $error ($ref->errors->all) {
+            warn sprintf "FATAL: eBay API Error: %s - %s\n", $error->errorId, $error->longMessage;
+		}
+		exit ERROR_FATAL;
+	   }
 
         # set before first results are in
-        if ( not $total ) {
-            $total = $o->max // $ref->total;
-            die qq{FATAL: total not set, something is wrong!\n} if not $total;
-            $total        = ( $total < MAX_TOTAL ) ? $total : MAX_TOTAL;    # limit set above, based on eBay docs
-            $num_requests = int $total / $o->limit;
-            $o->max($total);
-        }
+        $total = $o->max // $ref->total;
+        $total        = ( $total < MAX_TOTAL ) ? $total : MAX_TOTAL;    # limit set above, based on eBay docs
+        $num_requests = ceil($total / $o->limit);
+        $o->max($total);
 
-        $gotten += $o->limit;
+        $gotten += ($total > $o->limit) ? $o->limit : $total;
 
         ++$request_count;
-        printf STDERR qq{%02d/%d requests, %05d/%d items gotten ...\n}, $request_count, $num_requests, $gotten, $total if $o->stats;
+
+        printf STDERR qq{%02d/%02d requests, %05d/%02d items gotten ...\n}, $request_count, $num_requests, $gotten, $total if $o->stats;
 
         if ( $o->max and $o->max < $gotten ) {
             printf STDERR qq{fetch shutting down, number got exceeded max set with, "--max %d"\n}, $o->max;
@@ -121,20 +145,20 @@ sub browse {
         };
 #>>>
 
-        # parse out query params in the 'next' field, (next URL with updated pagination details)
-        my (@query) = split /[?&]/, $ec->next;
-        my $url     = shift @query;
-        my %params  = map { split /=/, $_ } @query;
-        my $p       = h2o \%params;
-
-        # output "next" command to STDERR, maybe can be used to script an external looping...
-        printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s --as yaml --continue\n}, $p->offset, $p->limit, $p->sort, $p->category_ids if $o->nextcmd;
-
         # run again, with the updated pagination parameters
         if ( $o->continue and $ec->next ) {
-            $o->offset( $p->offset );
-            $o->limit( $p->limit );
-            goto GETITEMS;
+           # parse out query params in the 'next' field, (next URL with updated pagination details)
+           my (@query) = split /[?&]/, $ec->next;
+           my $url     = shift @query;
+           my %params  = map { split /=/, $_ } @query;
+           my $p       = h2o \%params;
+
+           # output "next" command to STDERR, maybe can be used to script an external looping...
+           printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s --as yaml --continue\n}, $p->offset, $p->limit, $p->sort, $p->category_ids if $o->nextcmd;
+
+           $o->offset( $p->offset );
+           $o->limit( $p->limit );
+           goto GETITEMS;
         }
     }
 
