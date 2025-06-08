@@ -6,8 +6,9 @@ use warnings;
 use JSON;
 use URI qw/query_form/;
 use HTTP::Tiny;
+use HTTP::Status;
 use MIME::Base64;
-use Util::H2O::More qw/baptise d2o ddd h2o ini2h2o/;
+use Util::H2O::More qw/baptise d2o ddd HTTPTiny2h2o h2o ini2h2o o2h/;
 
 our $EBAY_ENDPOINT_BASE = q{https://api.ebay.com};
 
@@ -48,47 +49,82 @@ sub oauth2 {
     return $self;
 }
 
-# TODO: implement "getItems" - can get up to 20 items per call according to documentation
+sub warn_if_exists {
+  my ($self, $headers, $header) = @_;
+  if (exists $headers->{$header}) {
+    warn sprintf("WARNING: '%s' detected: %s\n\n", $header, $headers->{$header})
+  }
+}
+
+# TODO: implement "getItems" - can get up to 20 items per call according to documentation - no available to only "selected" partners ...
 #   https://developer.ebay.com/api-docs/buy/browse/resources/item/methods/getItem
 #
 # Call limit for all Browse APIs is 5,000 / day
 #   https://developer.ebay.com/develop/apis/api-call-limits
 
-# getItems (part of the 'Browse' API
-sub getItems {
-
-}
-
-# https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
-
-#NOTE: "browser" is not meant to be a generic kitchen sink; if implementing your own "browse"
-sub browse {
-    my ($self, %params) = @_;
-    my $ua              = HTTP::Tiny->new();
-    my $uri             = URI->new('', 'http');
-    $uri->query_form(%params);
-    my $URL             = sprintf qq{%s/%s?%s}, $EBAY_ENDPOINT_BASE, q{buy/browse/v1/item_summary/search}, $uri->query;
+sub get_ua {
+    my ($self)          = @_;
     my $auth_token      = sprintf qq{Bearer %s}, $self->token->access_token;
     my $options         = {
-        headers    => {
+        default_headers    => {
             'Accept'                  => q{*/*},
             'Authorization'           => $auth_token,
             'X-EBAY-C-MARKETPLACE-ID' => 'EBAY_US',
             'X-EBAY-C-ENDUSERCTX'     => sprintf('affiliateCampaignId=%s', $self->config->eBay->affiliateCampaignId),
         },
-
         # define API scopes enabled by this token
         content => undef,
     };
-    my $response = h2o $ua->get($URL, $options);;
-    my $raw = $response->content;
+    my $ua              = HTTP::Tiny->new(%$options);
+    return $ua;
+}
+
+# getItem (part of the 'Browse' API); only gets one item at a time
+sub getItem {
+    my ($self, %params) = @_;
+    my $params = h2o \%params, qw/itemid/;
+    my $URL             = sprintf qq{%s/%s/v1|%s|0}, $EBAY_ENDPOINT_BASE, q{buy/browse/v1/item}, $params->itemid;
+
+    my $ua   = $self->get_ua;
+    my $resp = HTTPTiny2h2o $ua->get($URL);
+
+    # error handling
+    if (not is_success($resp->status)) {
+      $self->warn_if_exists($resp->headers, "x-ebay-api-call-limit");
+      $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-limit");
+      $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-remaining");
+      my $msg = $resp->content->errors->get(0)->longMessage;
+      die "$msg\n";
+    }
+
+    return $resp->content;;
+}
+
+# https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
+sub browse {
+    my ($self, %params) = @_;
+    my $ua              = $self->get_ua; 
+    my $uri             = URI->new('', 'http');
+    $uri->query_form(%params);
+    my $URL             = sprintf qq{%s/%s?%s}, $EBAY_ENDPOINT_BASE, q{buy/browse/v1/item_summary/search}, $uri->query;
+
+    my $resp = h2o $ua->get($URL);
+
+    my $raw = $resp->content;
     my $json        = from_json $raw;
     $json->{next}   = $json->{next}   // undef;         # d2o should probably allow some top level
     $json->{total}  = $json->{total}  // undef;         # default accessors to be defined
     d2o $json;
 
-    # detect error and throww the $json response as the error object
-    die $json if exists $json->{errors};
+    # error handling
+    if (not is_success($resp->status)) {
+      $self->warn_if_exists($resp->headers, "x-ebay-api-call-limit");
+      $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-limit");
+      $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-remaining");
+      $resp = HTTPTiny2h2o o2h $resp;
+      my $msg = $resp->content->{errors}->[0]->{longMessage};
+      die "$msg\n";
+    }
 
     # capture the next URL as member, "next"
     $self->next($json->next);

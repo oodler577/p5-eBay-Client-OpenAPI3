@@ -20,8 +20,8 @@ use POSIX qw/ceil/;
 binmode STDOUT;
 
 use constant {
-    ERROR_SUCCESS => 0,
-    ERROR_FATAL   => 1,
+    EXIT_SUCCESS => 0,
+    EXIT_FATAL   => 1,
     CONFIG        => sprintf( qq{%s/%s}, ( getpwuid $< )[7], qq{.ebayapi3.conf} ),
     MAX_TOTAL     => 10_000,                                                    #per documentation
 };
@@ -39,6 +39,7 @@ if ( not caller ) {
   [ $subcommand, \@ARGV, $o ],
   on browse => \&browse,
   on help   => \&show_help,
+  on item   => \&get_item,
   on oauth2 => \&oauth2;
 #>>>
     exit $exit;
@@ -48,7 +49,57 @@ sub show_help {
     print STDERR <<EOHELP;
  ... print help section
 EOHELP
-    return ERROR_FATAL;
+    return EXIT_FATAL;
+}
+
+sub get_item {
+    my $input_ref = shift;
+    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s itemid=i/;
+
+    my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
+
+    local $@;
+    my $ref = eval { $ec->oauth2->getItem( itemid => $o->itemid ) } or undef;
+
+#<<<
+   dispatch {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     xdefault $o->as, q{json};
+   } [ $o, $ref ],
+   on compactjson => sub {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     $ref->title(convert_to_ascii($ref->title));
+     my $coder = JSON::XS->new->utf8;
+     my $ascii = $coder->encode(o2d $ref);
+     print $ascii;
+   },
+   on json => sub {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     $ref->title(convert_to_ascii($ref->title));
+     my $coder = JSON::XS->new->utf8->pretty;
+     my $ascii = $coder->encode(o2d $ref);
+     print $ascii;
+   },
+   on summary => sub {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     $ref->title(convert_to_ascii($ref->title));
+     $ref->itemId((split(/\|/, $ref->itemId))[1]); # extracts actual itemId out of the "v1|ITEMID|0" legacy format
+     my $format = <<EOF;
+%s Title: %s
+Bids: %s
+Price: %s (%s)
+EOF
+     printf $format, $ref->itemId, $ref->title, $ref->bidCount, $ref->price->value, $ref->price->currency;
+   },
+   ;
+#>>>
+
+  return EXIT_SUCCESS;
 }
 
 sub browse {
@@ -65,31 +116,13 @@ sub browse {
         my $buyingOptions = join q{|}, @{ $o->buyopt };
         my $filter        = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
 
-	   local $@;
+        local $@;
         my $ref           = eval { $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort ) } or undef ;
-
-	# check for error
-
-#  'next' => undef,
-#  'total' => undef,
-#  'errors' => bless( [
-#     bless( {
-#       'longMessage' => 'The request limit has been reached for the resource.',
-#       'domain' => 'ACCESS',
-#       'category' => 'REQUEST',
-#       'message' => 'Too many requests.',
-#       'errorId' => 2001
-#     }, 'Util::H2O::_55c6a6fd1cc8' )
-#   ], 'Util::H2O::More::__a2o_62384735::vmethods' )
-# }, 'Util::H2O::_55c6a6f81a48' );
-
-	   # handle error; array reference, $ref->{errors}->{all} is expected to exist
-	   if ($@ and $ref->errors->all) {
-          foreach my $error ($ref->errors->all) {
-            warn sprintf "FATAL: eBay API Error: %s - %s\n", $error->errorId, $error->longMessage;
-		}
-		exit ERROR_FATAL;
-	   }
+        # handle error; array reference, $ref->{errors}->{all} is expected to exist
+        if ($@) {
+          warn sprintf "FATAL: eBay API Error: %s\n", $@;
+          exit EXIT_FATAL;
+        }
 
         # set before first results are in
         $total = $o->max // $ref->total;
@@ -121,7 +154,7 @@ sub browse {
           my $yaml = YAML::Dump($_ref);
           print $yaml;
         },
-        on prettyjson => sub {
+        on json => sub {
           my $input_ref = shift;
           my ($o, $ref) = @$input_ref;
           foreach my $item ($ref->itemSummaries->all) {
@@ -132,7 +165,7 @@ sub browse {
           my $ascii = $coder->encode(o2d $ref);
           print $ascii;
         },
-        on json => sub {
+        on compactjson => sub {
           my $input_ref = shift;
           my ($o, $ref) = @$input_ref;
           foreach my $item ($ref->itemSummaries->all) {
@@ -162,7 +195,7 @@ sub browse {
         }
     }
 
-    return ERROR_SUCCESS;
+    return EXIT_SUCCESS;
 }
 
 sub oauth2 { my $input_ref = shift;
@@ -180,7 +213,7 @@ sub oauth2 { my $input_ref = shift;
 
     }
     print $ec->token->access_token;
-    return ERROR_SUCCESS;
+    return EXIT_SUCCESS;
 }
 
 __END__
