@@ -45,11 +45,78 @@ if ( not caller ) {
     exit $exit;
 }
 
+# TODO - add help output and USAGE info in POD ..!!!!!!!!!!!!!
+
 sub show_help {
     print STDERR <<EOHELP;
- ... print help section
+ebayapi3 Client
+
+Each subcommand has it's own options.
+
+Subcommand: 'help'  - prints this help text
+
+ Example:
+
+   ebayapi3 help
+
+Subcommand: 'oauth' - creates a new, valid OAuth token
+
+ Example:
+
+   ebayapi3 oauth
+
+Subcommand: 'browse' - returns a list of items in the specified category(s)
+
+ Example:
+
+   ebayapi3 browse --limit 200 --category_ids 13885 --stats --as json
+
+ Options:
+   --as=s             json, compactjson, ascii
+   --buyopt=s@        passed to API URL query string
+   --category_ids=s   item categories to grab
+   --continue         run again, with the updated pagination parameters
+   --limit=i          enforces a limit
+   --max=i            bound number of results
+   --nextcmd
+   --offset=i         paginatino controller
+   --sort=i           API sort parameter
+   --stats            reports iteration and item count via STDERR
+
+Subcommand: 'item' - dumps the JSON for the specified item id
+
+  Example
+
+    ebayapi3 item --itemid 21323232123 --as json
+
+  Options:
+    --itemid          eBay item id, internally converts it to the "legacy" format
+    --as              json, compactjson, summary
+
+Author:
+
+Brett Estrade <oodler\@cpan.org>, <brett\@acutisdata.com>
+
+Support Statement:
+
+This client is meant to serve the needs of those who use it, if
+a feature you want is not here; let me know, and we'll work something
+out.
+  
 EOHELP
     return EXIT_FATAL;
+}
+
+sub oauth2 { my $input_ref = shift;
+    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s/;
+    my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
+    $ec->oauth2;
+    if ( $o->as and $o->as eq q{json} ) {
+        print encode_json o2h $ec->token;
+    }
+    print $ec->token->access_token;
+    return EXIT_SUCCESS;
 }
 
 sub get_item {
@@ -120,7 +187,7 @@ sub browse {
         my $ref           = eval { $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort ) } or undef ;
         # handle error; array reference, $ref->{errors}->{all} is expected to exist
         if ($@) {
-          warn sprintf "FATAL: eBay API Error: %s\n", $@;
+          warn sprintf "FATAL: eBay 'browse' (item_summary/search) API Error, %s", $@;
           exit EXIT_FATAL;
         }
 
@@ -141,7 +208,8 @@ sub browse {
             exit;
         }
 
-#<<<
+#<<<    
+        # handle output options
         dispatch {
           my $input_ref = shift;
           my ($o, $ref) = @$input_ref;
@@ -198,24 +266,6 @@ sub browse {
     return EXIT_SUCCESS;
 }
 
-sub oauth2 { my $input_ref = shift;
-    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s/;
-    my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
-    $ec->oauth2;
-    if ( $o->as and $o->as eq q{json} ) {
-        print encode_json o2h $ec->token;
-    }
-    elsif ( $o->as and $o->as eq q{yaml} ) {
-
-    }
-    elsif ( $o->as and $o->as eq q{ini} ) {
-
-    }
-    print $ec->token->access_token;
-    return EXIT_SUCCESS;
-}
-
 __END__
 
 =head1 NAME ebayapi3 - a commandline client using Perl's eBay::Client::OpenAPI3
@@ -244,7 +294,16 @@ flag.
 
 =head2 C<ebay3cli oauth2>
 
+Dumps a new OAuth token needed for making API calls.
+
 =head2 C<ebay3cli browse>
+
+Dumps JSON for a list of items in 1 or more specifieced categories, run
+C<ebay3cli help> for more info and examples.
+
+=head2 C<ebay3cli item>
+
+Dumps JSON for a specific item, run C<ebay3cli help> for more info and examples.
 
 =head1 ENVIRONMENT
 

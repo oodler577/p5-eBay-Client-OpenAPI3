@@ -56,9 +56,6 @@ sub warn_if_exists {
   }
 }
 
-# TODO: implement "getItems" - can get up to 20 items per call according to documentation - no available to only "selected" partners ...
-#   https://developer.ebay.com/api-docs/buy/browse/resources/item/methods/getItem
-#
 # Call limit for all Browse APIs is 5,000 / day
 #   https://developer.ebay.com/develop/apis/api-call-limits
 
