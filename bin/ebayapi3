@@ -128,6 +128,10 @@ sub get_item {
 
     local $@;
     my $ref = eval { $ec->oauth2->getItem( itemid => $o->itemid ) } or undef;
+    if ($@) {
+       warn sprintf "FATAL: eBay 'getItem' (buy/browse/v1/item) API Error, %s", $@;
+       exit EXIT_FATAL;
+    }
 
 #<<<
    dispatch {
