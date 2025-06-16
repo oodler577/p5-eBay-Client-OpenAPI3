@@ -40,7 +40,9 @@ if ( not caller ) {
   on browse => \&browse,
   on help   => \&show_help,
   on item   => \&get_item,
-  on oauth2 => \&oauth2;
+  on oauth2 => \&oauth2,
+  on rate   => \&rate_limit,
+  ;
 #>>>
     exit $exit;
 }
@@ -93,6 +95,15 @@ Subcommand: 'item' - dumps the JSON for the specified item id
     --itemid          eBay item id, internally converts it to the "legacy" format
     --as              json, compactjson, summary
 
+Subcommand: 'rate' - dumps the JSON for the calling rate quota
+
+  Example
+
+    ebayapi3 rate --as json
+
+  Options:
+    --as              json, compactjson, summary
+
 Author:
 
 Brett Estrade <oodler\@cpan.org>, <brett\@acutisdata.com>
@@ -117,6 +128,59 @@ sub oauth2 { my $input_ref = shift;
     }
     print $ec->token->access_token;
     return EXIT_SUCCESS;
+}
+
+sub rate_limit {
+    my $input_ref = shift;
+    my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s/;
+
+    my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
+
+    local $@;
+    my $ref = eval { $ec->oauth2->rate_limit( api_name => "browse" ) } or undef;
+    if ($@) {
+       warn sprintf "FATAL: eBay 'rate_limit' (developer/analytics/v1_beta/rate_limit?api_name=browse) API Error, %s", $@;
+       exit EXIT_FATAL;
+    }
+
+#<<<
+   dispatch {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     xdefault $o->as, q{json};
+   } [ $o, $ref ],
+   on compactjson => sub {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     my $coder = JSON::XS->new->utf8;
+     print $coder->encode(o2d $ref);
+   },
+   on json => sub {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     my $coder = JSON::XS->new->utf8->pretty;
+     print $coder->encode(o2d $ref);
+   },
+   on summary => sub {
+     my $input_ref = shift;
+     my ($o, $ref) = @$input_ref;
+     my $format = <<EOF;
+%s API Call Rates
+Limit:  %s
+Used :  %s
+Left :  %s
+Reset:  %s
+Period: %s
+EOF
+     my $info = $ref->rateLimits->get(0)->resources->get(0);
+     my $rates = $info->rates->get(0);
+     printf $format, $info->name, $rates->limit, $rates->count, $rates->remaining, $rates->reset, $rates->timeWindow;
+   },
+   ;
+#>>>
+
+  return EXIT_SUCCESS;
 }
 
 sub get_item {
@@ -296,18 +360,22 @@ JSON, it would be an invalid file of isolated JSON objects listed one right
 after the other. If you really want to output in JSON, look at the C<--as json>
 flag.
 
-=head2 C<ebay3cli oauth2>
+=head2 C<ebayapi3 oauth2>
 
 Dumps a new OAuth token needed for making API calls.
 
-=head2 C<ebay3cli browse>
+=head2 C<ebayapi3 browse>
 
 Dumps JSON for a list of items in 1 or more specifieced categories, run
-C<ebay3cli help> for more info and examples.
+C<ebayapi3 help> for more info and examples.
 
-=head2 C<ebay3cli item>
+=head2 C<ebayapi3 item>
 
-Dumps JSON for a specific item, run C<ebay3cli help> for more info and examples.
+Dumps JSON for a specific item, run C<ebayapi3 help> for more info and examples.
+
+=head2 C<ebayapi3 rate>
+
+Dumps JSON for the the APIs used in this tool, namely C<browse>.
 
 =head1 ENVIRONMENT
 

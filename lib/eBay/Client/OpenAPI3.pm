@@ -76,6 +76,32 @@ sub get_ua {
     return $ua;
 }
 
+# https://api.ebay.com/developer/analytics/v1_beta/rate_limit?api_name=browse
+sub rate_limit {
+    my ($self, %params) = @_;
+    my $ua              = $self->get_ua; 
+    my $uri             = URI->new('', 'http');
+    $uri->query_form(%params);
+    my $URL             = sprintf qq{%s/%s?%s}, $EBAY_ENDPOINT_BASE, q{developer/analytics/v1_beta/rate_limit}, $uri->query;
+
+    my $resp = h2o $ua->get($URL);
+
+    my $raw = $resp->content;
+    my $json        = from_json $raw;
+    d2o $json;
+
+    if (not is_success($resp->status)) {
+      $self->warn_if_exists($resp->headers, "x-ebay-api-call-limit");
+      $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-limit");
+      $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-remaining");
+      my $status = $resp->status;
+      my $msg = $resp->content->errors->get(0)->longMessage // "Unknown error";;
+      die "$msg (HTTP Status: $status)\n";
+    }
+
+    return $json;
+}
+
 # getItem (part of the 'Browse' API); only gets one item at a time
 sub getItem {
     my ($self, %params) = @_;
@@ -90,8 +116,9 @@ sub getItem {
       $self->warn_if_exists($resp->headers, "x-ebay-api-call-limit");
       $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-limit");
       $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-remaining");
-      my $msg = $resp->content->errors->get(0)->longMessage;
-      die "$msg\n";
+      my $status = $resp->status;
+      my $msg = $resp->content->errors->get(0)->longMessage // "Unknown error";;
+      die "$msg (HTTP Status: $status)\n";
     }
 
     return $resp->content;;
@@ -113,14 +140,13 @@ sub browse {
     $json->{total}  = $json->{total}  // undef;         # default accessors to be defined
     d2o $json;
 
-    # error handling
     if (not is_success($resp->status)) {
       $self->warn_if_exists($resp->headers, "x-ebay-api-call-limit");
       $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-limit");
       $self->warn_if_exists($resp->headers, "x-ebay-api-throttle-remaining");
-      $resp = HTTPTiny2h2o o2h $resp;
-      my $msg = $resp->content->{errors}->[0]->{longMessage};
-      die "$msg\n";
+      my $status = $resp->status;
+      my $msg = $resp->content->errors->get(0)->longMessage // "Unknown error";;
+      die "$msg (HTTP Status: $status)\n";
     }
 
     # capture the next URL as member, "next"
