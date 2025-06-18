@@ -240,7 +240,7 @@ EOF
 sub browse {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=i stats/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=i stats/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
     my ( $total, $gotten, $num_requests, $request_count );
@@ -251,12 +251,22 @@ sub browse {
         my $buyingOptions = join q{|}, @{ $o->buyopt };
         my $filter        = sprintf qq/buyingOptions:{%s}/, $buyingOptions;
 
+        # add 1 or more brands to the filter
+        if ($o->brand) {
+          my $brands      = join(q{|}, map { qq/"$_"/ } @{ $o->brand  }); # need to wrap brands in quotes
+          $filter         = sprintf qq/brand:{%s},%s/, $brands, $filter;
+        }
+
         local $@;
         my $ref           = eval { $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort ) } or undef ;
         # handle error; array reference, $ref->{errors}->{all} is expected to exist
         if ($@) {
           warn sprintf "FATAL: eBay 'browse' (item_summary/search) API Error, %s", $@;
           exit EXIT_FATAL;
+        }
+
+        foreach my $warning ($ref->warnings->all) {
+          warn sprintf "API WARNING: %s\n", $warning->message;
         }
 
         # set before first results are in

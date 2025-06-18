@@ -131,13 +131,13 @@ sub browse {
     my $uri             = URI->new('', 'http');
     $uri->query_form(%params);
     my $URL             = sprintf qq{%s/%s?%s}, $EBAY_ENDPOINT_BASE, q{buy/browse/v1/item_summary/search}, $uri->query;
-
     my $resp = h2o $ua->get($URL);
 
     my $raw = $resp->content;
-    my $json        = from_json $raw;
-    $json->{next}   = $json->{next}   // undef;         # d2o should probably allow some top level
-    $json->{total}  = $json->{total}  // undef;         # default accessors to be defined
+    my $json         = from_json $raw;
+    $json->{next}    = $json->{next}      // undef;  # d2o should probably allow some top level
+    $json->{total}   = $json->{total}     // undef;  # default accessors to be defined
+    $json->{warnings} = $json->{warnings} // [];     # default accessors to be defined
     d2o $json;
 
     if (not is_success($resp->status)) {
