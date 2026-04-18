@@ -82,7 +82,7 @@ Subcommand: 'browse' - returns a list of items in the specified category(s)
    --max=i            bound number of results
    --nextcmd
    --offset=i         paginatino controller
-   --sort=i           API sort parameter
+   --sort=s           API sort parameter: price, -price, newlyListed, endingSoonest, distance (requires input, not supported atm) 
    --stats            reports iteration and item count via STDERR
 
 Subcommand: 'item' - dumps the JSON for the specified item id
@@ -240,7 +240,7 @@ EOF
 sub browse {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=i stats/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=s stats/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
     my ( $total, $gotten, $num_requests, $request_count );

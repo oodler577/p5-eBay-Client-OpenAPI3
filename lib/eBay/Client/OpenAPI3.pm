@@ -138,6 +138,7 @@ sub browse {
     $json->{next}    = $json->{next}      // undef;  # d2o should probably allow some top level
     $json->{total}   = $json->{total}     // undef;  # default accessors to be defined
     $json->{warnings} = $json->{warnings} // [];     # default accessors to be defined
+    $json->{errors}   = $json->{errors}   // [ { longMessage => undef } ];
     d2o $json;
 
     if (not is_success($resp->status)) {
