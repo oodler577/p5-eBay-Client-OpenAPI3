@@ -82,7 +82,7 @@ Subcommand: 'browse' - returns a list of items in the specified category(s)
    --max=i            bound number of results
    --nextcmd
    --offset=i         paginatino controller
-   --sort=s           API sort parameter: price, -price, newlyListed, endingSoonest, distance (requires input, not supported atm) 
+   --sort=s           API sort parameter: price, -price, newlyListed, endingSoonest, distance (requires input, not supported atm)
    --stats            reports iteration and item count via STDERR
 
 Subcommand: 'item' - dumps the JSON for the specified item id
