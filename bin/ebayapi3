@@ -47,8 +47,6 @@ if ( not caller ) {
     exit $exit;
 }
 
-# TODO - add help output and USAGE info in POD ..!!!!!!!!!!!!!
-
 sub show_help {
     print STDERR <<EOHELP;
 ebayapi3 Client
@@ -61,11 +59,11 @@ Subcommand: 'help'  - prints this help text
 
    ebayapi3 help
 
-Subcommand: 'oauth' - creates a new, valid OAuth token
+Subcommand: 'oauth2' - creates a new, valid OAuth token
 
  Example:
 
-   ebayapi3 oauth
+   ebayapi3 oauth2
 
 Subcommand: 'browse' - returns a list of items in the specified category(s)
 
@@ -77,11 +75,13 @@ Subcommand: 'browse' - returns a list of items in the specified category(s)
    --as=s             json, compactjson, ascii
    --buyopt=s@        passed to API URL query string
    --category_ids=s   item categories to grab
+   --q=s              keyword query passed to item_summary/search
+   --filter=s@        extra raw Browse API filter(s), repeatable
    --continue         run again, with the updated pagination parameters
    --limit=i          enforces a limit
    --max=i            bound number of results
    --nextcmd
-   --offset=i         paginatino controller
+   --offset=i         pagination controller
    --sort=s           API sort parameter: price, -price, newlyListed, endingSoonest, distance (requires input, not supported atm)
    --stats            reports iteration and item count via STDERR
 
@@ -237,10 +237,17 @@ EOF
   return EXIT_SUCCESS;
 }
 
+sub shell_quote {
+    my ($value) = @_;
+    return q{''} if not defined $value or $value eq q{};
+    $value =~ s/'/'\''/g;
+    return qq{'$value'};
+}
+
 sub browse {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s continue limit=i max=i nextcmd offset=i sort=s stats/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s q=s filter=s@ continue limit=i max=i nextcmd offset=i sort=s stats/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
     my ( $total, $gotten, $num_requests, $request_count );
@@ -257,8 +264,22 @@ sub browse {
           $filter         = sprintf qq/brand:{%s},%s/, $brands, $filter;
         }
 
+        # add raw Browse API filters, conservatively appended after generated filters
+        if ($o->filter) {
+          $filter = join q{,}, $filter, @{ $o->filter };
+        }
+
         local $@;
-        my $ref           = eval { $ec->oauth2->browse( filter => $filter, category_ids => $o->category_ids, limit => $o->limit, offset => $o->offset, sort => $o->sort ) } or undef ;
+        my $ref           = eval {
+          $ec->oauth2->browse(
+            filter       => $filter,
+            category_ids => $o->category_ids,
+            q            => $o->q,
+            limit        => $o->limit,
+            offset       => $o->offset,
+            sort         => $o->sort,
+          )
+        };
         # handle error; array reference, $ref->{errors}->{all} is expected to exist
         if ($@) {
           warn sprintf "FATAL: eBay 'browse' (item_summary/search) API Error, %s", $@;
@@ -333,7 +354,18 @@ sub browse {
            my $p       = h2o \%params;
 
            # output "next" command to STDERR, maybe can be used to script an external looping...
-           printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s --as yaml --continue\n}, $p->offset, $p->limit, $p->sort, $p->category_ids if $o->nextcmd;
+           if ($o->nextcmd) {
+              my $q_arg      = defined $o->q ? sprintf(q{ --q %s}, shell_quote($o->q)) : q{};
+              my $filter_arg = $o->filter  ? join(q{}, map { sprintf(q{ --filter %s}, shell_quote($_)) } @{ $o->filter }) : q{};
+
+              printf STDERR qq{./bin/ebayapi3 browse --offset %s --limit %s --sort %s --category_ids %s%s%s --as yaml --continue\n},
+                shell_quote($p->offset),
+                shell_quote($p->limit),
+                shell_quote($p->sort),
+                shell_quote($p->category_ids),
+                $q_arg,
+                $filter_arg;
+           }
 
            $o->offset( $p->offset );
            $o->limit( $p->limit );
