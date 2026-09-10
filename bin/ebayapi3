@@ -9,7 +9,7 @@ use FindBin qw/$Bin/;
 use lib qq{$Bin/../lib};
 use JSON::XS             qw/encode_json decode_json/;
 use Util::H2O::More      qw/ddd Getopt2h2o h2o o2h o2d/;
-use URI                  qw/query_form/;
+use URI ();
 use YAML                 qw//;
 use eBay::Client::OpenAPI3;
 use Dispatch::Fu;
@@ -26,25 +26,43 @@ use constant {
     MAX_TOTAL     => 10_000,                                                    #per documentation
 };
 
-my $subcommand = shift @ARGV;
-my $o          = { config => CONFIG, debug => undef, limit => 200, offset => 0, sort => q{endingSoonest}, verbose => undef };
+sub _default_options {
+    return {
+        config  => CONFIG,
+        debug   => undef,
+        limit   => 200,
+        offset  => 0,
+        sort    => q{endingSoonest},
+        verbose => undef,
+    };
+}
+
+sub run {
+    my ($argv_ref) = @_;
+    $argv_ref ||= \@ARGV;
+
+    my @argv       = @$argv_ref;
+    my $subcommand = shift @argv;
+    my $o          = _default_options();
+
+#<<<
+    return dispatch {
+        my $input_ref = shift;
+        my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
+        xdefault $subcommand, q{oauth2};
+    }
+    [ $subcommand, \@argv, $o ],
+    on browse => \&browse,
+    on help   => \&show_help,
+    on item   => \&get_item,
+    on oauth2 => \&oauth2,
+    on rate   => \&rate_limit,
+    ;
+#>>>
+}
 
 if ( not caller ) {
-#<<<
-  my $exit = dispatch {
-      my $input_ref = shift;
-      my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-      xdefault $subcommand, q{oauth2};
-  }
-  [ $subcommand, \@ARGV, $o ],
-  on browse => \&browse,
-  on help   => \&show_help,
-  on item   => \&get_item,
-  on oauth2 => \&oauth2,
-  on rate   => \&rate_limit,
-  ;
-#>>>
-    exit $exit;
+    exit run(\@ARGV);
 }
 
 sub show_help {
@@ -120,7 +138,7 @@ EOHELP
 
 sub oauth2 { my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s config=s/;
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
     $ec->oauth2;
     if ( $o->as and $o->as eq q{json} ) {
@@ -133,7 +151,7 @@ sub oauth2 { my $input_ref = shift;
 sub rate_limit {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s config=s/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
 
@@ -141,7 +159,7 @@ sub rate_limit {
     my $ref = eval { $ec->oauth2->rate_limit( api_name => "browse" ) } or undef;
     if ($@) {
        warn sprintf "FATAL: eBay 'rate_limit' (developer/analytics/v1_beta/rate_limit?api_name=browse) API Error, %s", $@;
-       exit EXIT_FATAL;
+       return EXIT_FATAL;
     }
 
 #<<<
@@ -186,7 +204,7 @@ EOF
 sub get_item {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s itemid=i/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s config=s itemid=i/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
 
@@ -194,7 +212,7 @@ sub get_item {
     my $ref = eval { $ec->oauth2->getItem( itemid => $o->itemid ) } or undef;
     if ($@) {
        warn sprintf "FATAL: eBay 'getItem' (buy/browse/v1/item) API Error, %s", $@;
-       exit EXIT_FATAL;
+       return EXIT_FATAL;
     }
 
 #<<<
@@ -247,7 +265,7 @@ sub shell_quote {
 sub browse {
     my $input_ref = shift;
     my ( $subcommand, $ARGV_ref, $o ) = @$input_ref;
-    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s q=s filter=s@ continue limit=i max=i nextcmd offset=i sort=s stats/;
+    Getopt2h2o $ARGV_ref, $o, qw/as=s brand=s@ buyopt=s@ category_ids=s config=s q=s filter=s@ continue limit=i max=i nextcmd offset=i sort=s stats/;
 
     my $ec = eBay::Client::OpenAPI3->new( config => $o->config );
     my ( $total, $gotten, $num_requests, $request_count );
@@ -283,7 +301,7 @@ sub browse {
         # handle error; array reference, $ref->{errors}->{all} is expected to exist
         if ($@) {
           warn sprintf "FATAL: eBay 'browse' (item_summary/search) API Error, %s", $@;
-          exit EXIT_FATAL;
+          return EXIT_FATAL;
         }
 
         foreach my $warning ($ref->warnings->all) {
@@ -304,7 +322,7 @@ sub browse {
 
         if ( $o->max and $o->max < $gotten ) {
             printf STDERR qq{fetch shutting down, number got exceeded max set with, "--max %d"\n}, $o->max;
-            exit;
+            return EXIT_SUCCESS;
         }
 
 #<<<    
@@ -376,75 +394,142 @@ sub browse {
     return EXIT_SUCCESS;
 }
 
+1;
+
 __END__
 
-=head1 NAME ebayapi3 - a commandline client using Perl's eBay::Client::OpenAPI3
+=head1 NAME
+
+ebayapi3 - command-line client for eBay::Client::OpenAPI3
 
 =head1 SYNOPSIS
 
-  ./bin/ebayapi3 browse --limit 200 --category_ids 13885 --stats --continue >
-  latest.yaml
+  ebayapi3 oauth2
+
+  ebayapi3 browse \
+      --limit 200 \
+      --category_ids 13885 \
+      --stats \
+      --continue \
+      --as yaml > latest.yaml
+
+  ebayapi3 item --itemid 21323232123 --as json
+
+  ebayapi3 rate --as summary
 
 =head1 DESCRIPTION
 
-This is an unambitious client for the  eBay OpenAPI 3.0 client that exposes some
-of what's in L<eBay::Client::OpenAPI3> for commandline use.
+C<ebayapi3> is the command-line interface used with
+L<eBay::Client::OpenAPI3>.  The initial CPAN packaging deliberately preserves
+its pre-CPAN command behavior because existing applications use this utility.
 
-It implements subcommands, but there are only 2 that are currently available:
-I<browse> and I<oauth>.
+The available subcommands are C<oauth2>, C<browse>, C<item>, C<rate>, and
+C<help>.  With no subcommand, the utility defaults to C<oauth2> as before.
 
-=head2 USAGE
+=head1 CONFIGURATION
 
-B<Note:> the default output is in YAML. The reason for this is because it is
-easier to dump seperate I<documents> (here, eBay result sets) to the same file
-due ti the use of the C<---> separator. If the same thing was attempted with
-JSON, it would be an invalid file of isolated JSON objects listed one right
-after the other. If you really want to output in JSON, look at the C<--as json>
-flag.
-
-=head2 C<ebayapi3 oauth2>
-
-Dumps a new OAuth token needed for making API calls.
-
-=head2 C<ebayapi3 browse>
-
-Dumps JSON for a list of items in 1 or more specifieced categories, run
-C<ebayapi3 help> for more info and examples.
-
-=head2 C<ebayapi3 item>
-
-Dumps JSON for a specific item, run C<ebayapi3 help> for more info and examples.
-
-=head2 C<ebayapi3 rate>
-
-Dumps JSON for the the APIs used in this tool, namely C<browse>.
-
-=head1 ENVIRONMENT
-
-By default, this utility looks for configuration details in C<~/.ebayapi3.conf>,
-and expects valid information in the following INI structure:
+By default the utility reads C<~/.ebayapi3.conf>.  The documented C<--config>
+option is accepted by each API subcommand in version 0.01 so a different INI
+file can be selected explicitly.
 
   [eBay]
-  client_id            = something-SLUG-PRO-dead-beef-4567
-  client_secret        = PRD-dead-beef-1234
-  affiliateCampaignId  = someinteger 
-  affiliateReferenceId =  notsurewhatthislookslike
+  client_id            = your-client-id
+  client_secret        = your-client-secret
+  affiliateCampaignId  = your-epn-campaign-id
+  affiliateReferenceId = optional-reference-id
 
-=head1 BUGS & SUPPORT REQUESTS
+=head1 COMMANDS
 
-Please report bugs on Github.
+=head2 oauth2
 
-L<< https://github.com/oodler577/p5-eBay-Client-OpenAPI3/issues >>
+Obtains a new application OAuth token.
 
-The author of this utlity and module may be contracted for very reasonable rates
-by anyone wishing to significantly extend it or the underlying module - provided
-the changes may be incorporated into the public version of this module. Please
-email the author at the email listed below if interested.
+The historical default output is the bare access token.  For compatibility,
+C<--as json> retains the existing behavior: it prints the encoded token response
+and then the bare access token.  This is not changed in the initial CPAN
+packaging pass.
+
+=head2 browse
+
+Calls the Browse API C<item_summary/search> endpoint.
+
+The default output selected by the executable is JSON.  C<--as compactjson> and
+C<--as yaml> are also supported.  This corrects older POD which said YAML was
+the default even though the executable actually defaulted to JSON.
+
+C<--continue> retains the existing pagination behavior.  In particular, JSON
+page responses are written consecutively; the utility does not wrap them in a
+new JSON array in version 0.01.  Existing consumers depending on that stream are
+therefore not forced to change for the CPAN release.
+
+C<--nextcmd> likewise retains the existing command format, including emitting a
+YAML continuation command.
+
+Common options include:
+
+  --as=s
+  --brand=s@
+  --buyopt=s@
+  --category_ids=s
+  --config=s
+  --q=s
+  --filter=s@
+  --continue
+  --limit=i
+  --max=i
+  --nextcmd
+  --offset=i
+  --sort=s
+  --stats
+
+Unless C<--buyopt> is supplied, the utility retains its existing AUCTION buying
+option filter.
+
+=head2 item
+
+Retrieves one item by its numeric legacy eBay item ID.
+
+  ebayapi3 item --itemid 21323232123 --as json
+
+Output modes are C<json>, C<compactjson>, and C<summary>.
+
+=head2 rate
+
+Retrieves Developer Analytics rate-limit information for the Browse API.
+
+Output modes are C<json>, C<compactjson>, and C<summary>.
+
+=head2 help
+
+Prints command help to STDERR.  The historical non-zero help return status is
+retained in version 0.01.
+
+=head1 EXIT STATUS
+
+Normal API commands return 0 on success and 1 for the handled API failures that
+were already reported by the command.  The explicit C<help> command retains its
+historical status of 1.
+
+=head1 COMPATIBILITY
+
+Version 0.01 adds a callable C<run()> entry point to make the command dispatcher
+testable, but normal execution still invokes exactly the same subcommands and
+preserves the existing CLI output/pagination semantics.  The new entry point is
+primarily an internal testing seam.
+
+=head1 BUGS AND SUPPORT
+
+L<https://github.com/oodler577/p5-eBay-Client-OpenAPI3/issues>
 
 =head1 AUTHOR
 
 Oodler 577 L<< <oodler@cpan.org> >>
 
-=head1 LICENSE & COPYRIGHT
+=head1 LICENSE AND COPYRIGHT
 
-Same as Perl/C<perl>.
+This software is copyright (c) 2026 by Brett Estrade.
+
+This is free software; you can redistribute it and/or modify it under the same
+terms as the Perl 5 programming language system itself.
+
+=cut

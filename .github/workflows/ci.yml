@@ -1,0 +1,47 @@
+name: perl-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        perl: ['5.16', '5.32', '5.40', '5.42']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+
+      - name: Install dependencies
+        run: cpanm --notest --installdeps .
+
+      - name: Run tests
+        run: prove -lr t
+
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: '5.42'
+
+      - name: Install dependencies
+        run: |
+          cpanm --notest --installdeps .
+          cpanm --notest Devel::Cover
+
+      - name: Run coverage
+        run: |
+          cover -delete
+          PERL5OPT=-MDevel::Cover prove -lr t
+          cover -report text

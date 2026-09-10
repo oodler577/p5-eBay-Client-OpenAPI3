@@ -4,12 +4,13 @@ use strict;
 use warnings;
 
 use JSON;
-use URI qw/query_form/;
+use URI ();
 use HTTP::Tiny;
 use HTTP::Status;
 use MIME::Base64;
 use Util::H2O::More qw/baptise d2o ddd HTTPTiny2h2o h2o ini2h2o o2h/;
 
+our $VERSION = '0.01';
 our $EBAY_ENDPOINT_BASE = q{https://api.ebay.com};
 
 sub new {
@@ -22,9 +23,15 @@ sub new {
     return $self;
 }
 
+# Construction seam used by tests/subclasses; default behavior remains HTTP::Tiny.
+sub _new_ua {
+    my ($self, %opts) = @_;
+    return HTTP::Tiny->new(%opts);
+}
+
 sub oauth2 {
     my ($self)        = @_;
-    my $ua            = HTTP::Tiny->new();
+    my $ua            = $self->_new_ua();
     my $URL           = sprintf qq{%s/%s},    $EBAY_ENDPOINT_BASE, q{identity/v1/oauth2/token};
     my $authorization = sprintf qq{%s:%s},    $self->config->eBay->client_id, $self->config->eBay->client_secret;
     my $auth_token    = sprintf qq{Basic %s}, encode_base64( $authorization, q{} );
@@ -84,7 +91,7 @@ sub get_ua {
         # define API scopes enabled by this token
         content => undef,
     };
-    my $ua              = HTTP::Tiny->new(%$options);
+    my $ua              = $self->_new_ua(%$options);
     return $ua;
 }
 
@@ -135,6 +142,12 @@ sub getItem {
     return $resp->content;;
 }
 
+# Perl-style alias; retain getItem() for compatibility with existing callers.
+sub get_item {
+    my ($self, @args) = @_;
+    return $self->getItem(@args);
+}
+
 # https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
 sub browse {
     my ($self, %params) = @_;
@@ -174,173 +187,169 @@ __END__
 
 =head1 NAME
 
-eBay::Client::OpenAPI3 - Lightweight client for eBay Browse API (item_summary/search)
+eBay::Client::OpenAPI3 - lightweight client for selected eBay REST APIs
 
 =head1 VERSION
 
-0.01
+Version 0.01
 
 =head1 SYNOPSIS
 
   use eBay::Client::OpenAPI3;
 
-  my $ec = eBay::Client::OpenAPI3->new(
-    config => {
-      oauth2_token => '...',
-    }
+  my $ebay = eBay::Client::OpenAPI3->new(
+      config => "$ENV{HOME}/.ebayapi3.conf",
   );
 
-  my $res = $ec->browse(
-    category_ids => '13956',
-    q            => 'patch insignia SSI',
-    filter       => 'buyingOptions:{AUCTION}',
-    limit        => 50,
-    offset       => 0,
-    sort         => 'newlyListed',
+  my $results = $ebay->oauth2->browse(
+      category_ids => 13956,
+      q            => 'patch insignia SSI',
+      filter       => 'buyingOptions:{AUCTION}',
+      limit        => 50,
+      offset       => 0,
+      sort         => 'newlyListed',
   );
 
 =head1 DESCRIPTION
 
-C<eBay::Client::OpenAPI3> is a lightweight Perl client for the eBay Browse API
-C<item_summary/search> endpoint.
+C<eBay::Client::OpenAPI3> is a small client for the parts of eBay's REST API
+currently needed by its applications.  Version 0.01 supports application OAuth2,
+Browse API search, retrieving a Browse item from a legacy numeric item ID, and
+Developer Analytics rate-limit information.
 
-It is intended for data ingestion workflows where simple access to listings is
-required, supporting category filtering, keyword search, pagination, and filter
-expressions.
-
-This module does not attempt to fully abstract the API; parameters are passed
+The client intentionally remains close to the API.  It does not attempt to be a
+complete generated OpenAPI client, and Browse query parameters are passed
 through with minimal transformation.
+
+=head1 CONFIGURATION
+
+The constructor takes the filename of an INI configuration file.  It does not
+take a token hashref.
+
+  [eBay]
+  client_id            = your-client-id
+  client_secret        = your-client-secret
+  affiliateCampaignId  = your-epn-campaign-id
+  affiliateReferenceId = optional-reference-id
+
+C<client_id> and C<client_secret> are used to obtain an application OAuth token.
+The existing client behavior uses C<affiliateCampaignId> when building the
+C<X-EBAY-C-ENDUSERCTX> request header.  C<affiliateReferenceId> is retained in
+the configuration format for compatibility with existing deployments but is
+not currently added to that header by this module.
+
+The production endpoint and C<EBAY_US> marketplace are currently fixed in the
+implementation.
 
 =head1 METHODS
 
 =head2 new
 
-  my $ec = eBay::Client::OpenAPI3->new( config => \%config );
+  my $ebay = eBay::Client::OpenAPI3->new(
+      config => '/path/to/.ebayapi3.conf',
+  );
 
-Constructs a new client instance.
+Constructs a client and reads the INI configuration file.  The file must exist.
+No network request is made by the constructor.
 
-The C<config> hashref must include authentication credentials, typically an
-OAuth2 token:
+=head2 oauth2
 
-  oauth2_token => '...'
+  $ebay->oauth2;
+
+Obtains an application OAuth token using the client-credentials flow, stores the
+decoded token response in C<< $ebay->token >>, and returns the client object so
+calls can be chained.
 
 =head2 browse
 
-  my $res = $ec->browse(%params);
+  my $results = $ebay->browse(%params);
 
-Executes a request against:
+Calls the Browse API C<item_summary/search> endpoint:
 
   /buy/browse/v1/item_summary/search
 
-Parameters are passed directly to the API. Supported parameters include:
+Undefined values are omitted from the query string.  Common parameters include
+C<category_ids>, C<q>, C<filter>, C<limit>, C<offset>, and C<sort>.  Other
+supplied parameters are passed through rather than checked against a local copy
+of the eBay schema.
 
-=over 4
+The decoded response is returned as nested accessor objects.  The response's
+C<next> URL and C<total> value are also stored in C<< $ebay->next >> and
+C<< $ebay->total >>.
 
-=item * category_ids
+=head2 getItem
 
-Comma-separated list of eBay category IDs.
+  my $item = $ebay->getItem(itemid => 123456789012);
 
-=item * q
+Retrieves one Browse item.  The supplied numeric legacy item ID is converted to
+the REST Browse item-ID form C<v1|ITEMID|0>.
 
-Keyword search string. Space-separated terms are recommended. The eBay API uses
-relevance-based matching and does not guarantee strict boolean behavior.
+This camel-case spelling is the original public interface and is retained for
+compatibility.
 
-=item * filter
+=head2 get_item
 
-Filter expression string (e.g., C<buyingOptions:{AUCTION}>,
-C<price:[10..100]>). Multiple filters may be combined with commas.
+  my $item = $ebay->get_item(itemid => 123456789012);
 
-=item * limit
-
-Number of results per request (maximum 200).
-
-=item * offset
-
-Pagination offset.
-
-=item * sort
-
-Sort order. Common values include:
-
-  newlyListed
-  endingSoonest
-  price
-  -price
-
-=back
-
-Undefined parameters are omitted from the request automatically.
-
-Returns a decoded JSON structure, converted to an object via C<d2o>.
+A Perl-style alias for C<getItem>.  It does not change the behavior of the
+original method.
 
 =head2 rate_limit
 
-  my $info = $ec->rate_limit;
+  my $info = $ebay->rate_limit(api_name => 'browse');
 
-Fetches API rate limit information from:
+Calls the Developer Analytics rate-limit endpoint:
 
-  /buy/browse/v1/rate_limit
+  /developer/analytics/v1_beta/rate_limit
 
-Returns a decoded JSON structure.
+Query parameters are passed through to the endpoint.
+
+=head2 get_ua
+
+Builds the authenticated L<HTTP::Tiny> client used for API requests.  Normal
+callers generally use C<oauth2> first and then call one of the API methods.
 
 =head1 ERROR HANDLING
 
-If the API returns an error response, this module attempts to extract a
-meaningful message from the JSON payload (C<errors[0].longMessage>). If not
-available, the HTTP response reason is used.
+For Browse, item, and rate-limit requests, HTTP error responses cause the method
+to die.  The client attempts to use C<errors[0].longMessage> where available and
+includes the HTTP status.  eBay rate/throttle headers are warned when present on
+those failures.
 
-=head1 NOTES
+Version 0.01 deliberately preserves the pre-CPAN OAuth behavior rather than
+changing failure semantics during packaging cleanup.
 
-=over 4
+=head1 COMPATIBILITY
 
-=item *
+The initial CPAN release is intended to preserve the behavior of the pre-CPAN
+client and the C<ebayapi3> utility used by existing applications.  New method
+names and test seams in 0.01 are additive.
 
-The eBay Browse API does not support strict boolean logic in the C<q> parameter.
-For broader coverage, multiple queries should be executed separately.
+=head1 LIMITATIONS
 
-=item *
+This release implements only a small subset of eBay's REST API surface.  It does
+not validate OpenAPI schemas, normalize responses into separate domain classes,
+or expose every Browse resource.
 
-Filter expressions follow eBay API syntax and are passed through without
-validation.
+=head1 BUGS AND SUPPORT
 
-=item *
+Please report bugs and feature requests at:
 
-This module is intentionally minimal and does not perform schema validation or
-result normalization.
+L<https://github.com/oodler577/p5-eBay-Client-OpenAPI3/issues>
 
-=back
+Source repository:
 
-=head1 DEPENDENCIES
-
-=over 4
-
-=item * L<HTTP::Tiny>
-
-=item * L<JSON>
-
-=item * L<URI>
-
-=item * L<Util::H2O::More>
-
-=back
-
-=head1 BUGS & LIMITATIONS
-
-Please report bugs on Github.
-
-L<< https://github.com/oodler577/p5-eBay-Client-OpenAPI3/issues >>
+L<https://github.com/oodler577/p5-eBay-Client-OpenAPI3>
 
 =head1 AUTHOR
 
-Brett Estrade L<< <brett@acutisdata.com> >>
+Oodler 577 L<< <oodler@cpan.org> >>
 
-The author of this utlity and module may be contracted for very reasonable rates
-by anyone wishing to significantly extend it or the underlying module - provided
-the changes may be incorporated into the public version of this module. Please
-email the author at the email listed below if interested.
+=head1 LICENSE AND COPYRIGHT
 
+This software is copyright (c) 2026 by Brett Estrade.
 
-=head1 LICENSE & COPYRIGHT
+This is free software; you can redistribute it and/or modify it under the same
+terms as the Perl 5 programming language system itself.
 
-Same as Perl/C<perl>.
-
+=cut
